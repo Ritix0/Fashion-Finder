@@ -1,0 +1,10 @@
+# Test scripts and temporary artifacts
+*.py
+*.png
+test_*.js
+user_supabase_code.txt
+generated_media/
+__pycache__/
+google_img_sample.html
+real_verified_catalog.json
+real_wb_items.json

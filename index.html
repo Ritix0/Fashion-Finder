@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+
+  <title>Fashion Finder: поиск одежды на Wildberries и Ozon</title>
+  <meta name="description" content="Поиск одежды по фасонам, тканям и деталям кроя с прямыми ссылками на Wildberries и Ozon." />
+  <meta name="theme-color" content="#21153b" />
+
+  <!-- Шрифты: Caveat (рукописный прописной), Comfortaa (мягкий круглый), Nunito -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&family=Comfortaa:wght@400;600;700&family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+  <!-- Стили приложения -->
+  <link rel="stylesheet" href="style.css" />
+  
+
+  <!-- Проверка протокола: при открытии через file:// проверяем и перенаправляем на локальный сервер -->
+  <script>
+    if (window.location.protocol === 'file:') {
+      fetch('http://localhost:8080/index.html', { method: 'HEAD', mode: 'no-cors' })
+        .then(() => {
+          window.location.replace('http://localhost:8080/index.html');
+        })
+        .catch(() => {});
+    }
+  </script>
+
+  <!-- Инициализация Google CSE -->
+  <script>
+    window.__gcse = {
+      parsetags: 'explicit',
+      callback: function() {
+        try {
+          if (window.google && window.google.search && window.google.search.cse) {
+            google.search.cse.element.render({
+              div: 'cseTarget',
+              tag: 'search',
+              gname: 'fashionSearch',
+              attributes: {
+                defaultToImageSearch: true,
+                enableImageSearch: true
+              }
+            });
+            window.__cseReady = true;
+          }
+        } catch (e) {
+          console.warn('[CSE Init Error]:', e);
+        }
+      }
+    };
+  </script>
+  <!-- Google Programmable Search Engine ID: f4a91216ff6d641fd -->
+  <script async src="https://cse.google.com/cse.js?cx=f4a91216ff6d641fd"></script>
+</head>
+<body>
+  <!-- Контейнер для поиска фото через Google CSE -->
+  <div id="cseTarget" class="cse-hidden-container" aria-hidden="true"></div>
+  <!-- Сумеречное небо с плывущими облаками и мерцающими блёсточками -->
+  <div class="twilight-sky" aria-hidden="true">
+    <div class="stars-canvas">
+      <span class="star-twinkle s1" style="top: 8%; left: 12%;">✦</span>
+      <span class="star-twinkle s2" style="top: 15%; left: 84%;">✧</span>
+      <span class="star-twinkle s3" style="top: 28%; left: 22%;">⋆</span>
+      <span class="star-twinkle s4" style="top: 38%; left: 74%;">✨</span>
+      <span class="star-twinkle s5" style="top: 52%; left: 14%;">✦</span>
+      <span class="star-twinkle s6" style="top: 66%; left: 88%;">✧</span>
+      <span class="star-twinkle s7" style="top: 78%; left: 30%;">⋆</span>
+      <span class="star-twinkle s8" style="top: 88%; left: 78%;">✨</span>
+    </div>
+    <div class="cloud-band cloud-band-1"></div>
+    <div class="cloud-band cloud-band-2"></div>
+    <div class="cloud-band cloud-band-3"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- Шапка -->
+    <header class="ethereal-header">
+      <div class="header-brand">
+        <span class="magic-star">✨</span>
+        <div class="brand-names">
+          <h1 class="brand-title">Fashion Finder</h1>
+          <p class="brand-subtitle">поиск одежды на wildberries и ozon</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btnSettings" class="magic-btn" title="Настройки API">
+          <span>⚙️ Настройки</span>
+        </button>
+        <button id="btnResetAll" class="magic-btn reset-btn" title="Очистить поиск">
+          <span>Сбросить</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Главный поток диалога и парящих фотографий -->
+    <main class="lookbook-flow" id="chatFlow">
+      <!-- Стартовый экран поиска -->
+      <section class="welcome-hero" id="welcomeMsg">
+        <div class="welcome-badge">
+          <span class="welcome-badge-text">поиск по деталям кроя</span>
+        </div>
+
+        <h2 class="welcome-heading">Какую вещь ищем?</h2>
+        <p class="welcome-subtext">
+          Назови предмет одежды, цвет, посадку или ткань.<br>
+          Помощник найдет подходящие вещи в каталогах Wildberries и Ozon с прямыми ссылками.
+        </p>
+
+        <!-- Карточки вдохновения -->
+        <div class="welcome-inspiration-grid">
+          <button type="button" class="inspire-card" data-query="черная оверсайз футболка хлопок">
+            <span class="inspire-icon">✦</span>
+            <div class="inspire-info">
+              <span class="inspire-title">Оверсайз футболки</span>
+              <span class="inspire-desc">Плотный хлопок от 220 г/м²</span>
+            </div>
+          </button>
+
+          <button type="button" class="inspire-card" data-query="велосипедки с высокой посадкой черные">
+            <span class="inspire-icon">✧</span>
+            <div class="inspire-info">
+              <span class="inspire-title">Велосипедки</span>
+              <span class="inspire-desc">Высокая талия, эластичный материал</span>
+            </div>
+          </button>
+
+          <button type="button" class="inspire-card" data-query="уютное худи оверсайз с капюшоном">
+            <span class="inspire-icon">⋆</span>
+            <div class="inspire-info">
+              <span class="inspire-title">Свободные худи</span>
+              <span class="inspire-desc">Мягкий футер с капюшоном</span>
+            </div>
+          </button>
+
+          <button type="button" class="inspire-card" data-query="широкие брюки палаццо">
+            <span class="inspire-icon">✦</span>
+            <div class="inspire-info">
+              <span class="inspire-title">Брюки палаццо</span>
+              <span class="inspire-desc">Прямой свободный крой</span>
+            </div>
+          </button>
+        </div>
+
+        <p class="msg-note" id="keyStatusHint">
+          Поиск подключен. Результаты загружаются с фото и прямыми ссылками.
+        </p>
+      </section>
+    </main>
+
+    <!-- Невесомая нижняя панель ввода (свободный скролл, без наездов) -->
+    <footer class="ethereal-dock">
+      <div class="dock-content">
+        <!-- Динамические чипы последних тем поиска (строго 1 слово, макс 10, без обрезания) -->
+        <div id="recentChips" class="ethereal-chips" style="display: none;"></div>
+
+        <!-- Поле ввода -->
+        <form id="askForm" class="ethereal-input-form">
+          <div class="input-cloud">
+            <textarea
+              id="userInput"
+              class="cloud-textarea"
+              placeholder="Напиши вещь (например: черная плотная футболка оверсайз)..."
+              rows="1"
+            ></textarea>
+            <button type="submit" id="btnSend" class="cloud-submit-btn" title="Найти">
+              <span class="sparkle-icon">✨</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Модальное окно настроек -->
+  <div id="settingsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-cloud">
+      <div class="modal-head">
+        <h3 class="modal-title">Настройки поиска и модели</h3>
+        <button id="btnCloseSettings" class="close-modal-btn">✕</button>
+      </div>
+      
+      <div class="modal-content">
+        <div class="settings-section">
+          <h4 class="section-title">Ключ стилиста</h4>
+          <p class="section-desc">API-ключ для работы с DeepSeek — подбирает описание и теги по запросу.</p>
+          <div class="form-row">
+            <label class="form-label" for="customApiKey">API ключ (DeepSeek / OpenRouter):</label>
+            <input type="password" id="customApiKey" class="cloud-input" placeholder="sk-..." />
+          </div>
+        </div>
+      </div>
+
+
+      <div class="modal-foot">
+        <button id="btnSaveSettings" class="save-btn">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Уведомления -->
+  <div id="toastContainer" class="toast-area"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
