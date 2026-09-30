@@ -186,24 +186,40 @@ async function searchGoogleCse(query) {
         platform = wbCount <= ozonCount ? 'wb' : 'ozon';
       }
 
-      // Извлечение артикула (SKU)
+      // Проверяем: не является ли ссылка страницей категории, бренда или тега (как /tags/tapochki-bezzubik)
+      const isTagOrCategory = /\/(tags|category|brand|brands|promotions|kollektsii|seller)\//i.test(rawUrl);
+
+      // Извлечение реального числового артикула (SKU)
       let sku = '';
-      const wbM = rawUrl.match(/\/catalog\/(\d+)\//);
-      const ozonM = rawUrl.match(/-(\d{7,12})\/?/) || rawUrl.match(/\/product\/[^\/]+-(\d+)\//);
-      if (wbM) sku = wbM[1];
-      else if (ozonM) sku = ozonM[1];
+      let isExactProduct = false;
+
+      if (!isTagOrCategory) {
+        const wbM = rawUrl.match(/\/catalog\/(\d{6,11})/i) || rawUrl.match(/\/product\/(\d{6,11})/i);
+        const ozonM = rawUrl.match(/\/product\/[^\/]*?(\d{7,12})/i) || rawUrl.match(/\/product\/(\d{7,12})/i);
+        if (wbM) {
+          sku = wbM[1];
+          isExactProduct = true;
+          rawUrl = `https://www.wildberries.ru/catalog/${sku}/detail.aspx`;
+        } else if (ozonM) {
+          sku = ozonM[1];
+          isExactProduct = true;
+        }
+      }
 
       // Дедупликация
-      const dedupeKey = sku || rawUrl || imgSrc;
+      const dedupeKey = sku || (isExactProduct ? rawUrl : '') || imgSrc;
       if (dedupeKey && seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
 
-      // Корректная ссылка перехода в магазин
-      const finalUrl = rawUrl && rawUrl.startsWith('http') && !rawUrl.includes('google.com')
+      // Ссылка перехода:
+      // Если это реальный товар — даем прямую ссылку на его карточку.
+      // Если это страница тега или категории (вроде /tags/tapochki-bezzubik) —
+      // КАТЕГОРИЧЕСКИ НЕ ДАЕМ ссылку на чужой тег! Вместо этого формируем точный поиск этого товара:
+      const finalUrl = isExactProduct && rawUrl.startsWith('http')
         ? rawUrl
         : (platform === 'ozon'
-            ? `https://www.ozon.ru/search/?text=${encodeURIComponent(cleanQ)}`
-            : `https://www.wildberries.ru/catalog/0/search.aspx?search=${encodeURIComponent(cleanQ)}`);
+            ? `https://www.ozon.ru/search/?text=${encodeURIComponent(title || cleanQ)}`
+            : `https://www.wildberries.ru/catalog/0/search.aspx?search=${encodeURIComponent(title || cleanQ)}`);
 
       collected.push({
         id: sku,
@@ -211,7 +227,8 @@ async function searchGoogleCse(query) {
         price: 'В наличии',
         platform: platform,
         img: imgSrc,
-        url: finalUrl
+        url: finalUrl,
+        isExactProduct: isExactProduct
       });
     }
   }
@@ -247,6 +264,23 @@ async function searchGoogleCse(query) {
       if (collected.length >= 60) break;
     }
   }
+
+  // Умная сортировка результатов:
+  // 1. Приоритет карточкам с наибольшим совпадением ключевых слов запроса (тапочки, желтые и т.д.)
+  // 2. Приоритет карточкам с реальным подтвержденным артикулом (SKU)
+  const qWords = cleanQ.toLowerCase().split(/\s+/).filter(w => w.length >= 4);
+  collected.sort((a, b) => {
+    const aTitle = a.title.toLowerCase();
+    const bTitle = b.title.toLowerCase();
+
+    const aMatchCount = qWords.filter(w => aTitle.includes(w.slice(0, -1))).length;
+    const bMatchCount = qWords.filter(w => bTitle.includes(w.slice(0, -1))).length;
+
+    if (aMatchCount !== bMatchCount) {
+      return bMatchCount - aMatchCount;
+    }
+    return (b.isExactProduct ? 1 : 0) - (a.isExactProduct ? 1 : 0);
+  });
 
   // Формируем сбалансированную выдачу до 30 для WB и до 30 для Ozon (30 на 30 = 60)
   let wbItems = collected.filter(it => it.platform === 'wb').slice(0, 30);
@@ -304,8 +338,60 @@ const SYSTEM_PROMPT = `
 // =========================================================================
 
 /**
+ * Умная нормализация поискового запроса:
+ * - Исправляет опечатки ("сндалей" -> сандалии, "жжёлтые" -> желтые)
+ * - Убирает слова-паразиты ("типа", "как", "вроде", "купить", "пожалуйста")
+ * - Выносит цвет ("желтые", "черные" и т.д.) на первое место, чтобы Google искал именно нужный цвет
+ */
+function normalizeFashionQuery(raw) {
+  if (!raw) return '';
+  let str = raw.toLowerCase().replace(/ё/g, 'е').replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ');
+
+  const typos = {
+    'сндалей': 'сандалии',
+    'сандалей': 'сандалии',
+    'сандали': 'сандалии',
+    'сандаль': 'сандалии',
+    'жжелтые': 'желтые',
+    'жолтые': 'желтые',
+    'жёлтые': 'желтые',
+    'кросы': 'кроссовки',
+    'кроссы': 'кроссовки',
+    'велик': 'велосипедки',
+    'велы': 'велосипедки'
+  };
+
+  const stopWords = new Set([
+    'типа', 'как', 'вроде', 'наподобие', 'стиле', 'купить', 'пожалуйста',
+    'найди', 'мне', 'хочу', 'покажи', 'ищу', 'какой', 'какая', 'какие',
+    'что-то', 'прям', 'очень', 'бы'
+  ]);
+
+  const colorWords = [
+    'желтые', 'желтый', 'желтая', 'черные', 'черный', 'черная',
+    'белые', 'белый', 'белая', 'розовые', 'розовый', 'розовая',
+    'красные', 'красный', 'красная', 'синие', 'синий', 'синяя',
+    'зеленые', 'зеленый', 'зеленая', 'бежевые', 'бежевый', 'бежевая',
+    'серые', 'серый', 'серая', 'фиолетовые', 'фиолетовый', 'оранжевые'
+  ];
+
+  const tokens = str.split(/\s+/).filter(Boolean).map(t => typos[t] || t);
+  const meaningful = tokens.filter(t => !stopWords.has(t) && t.length >= 2);
+
+  // Ищем цвет
+  const foundColor = meaningful.find(t => colorWords.includes(t));
+  const otherWords = meaningful.filter(t => t !== foundColor);
+
+  // Цвет ВСЕГДА ставим на первое место в запросе для точной выдачи в Google
+  if (foundColor) {
+    return `${foundColor} ${otherWords.join(' ')}`.trim();
+  }
+  return meaningful.join(' ').trim();
+}
+
+/**
  * Извлекает строго 1 слово предмета на русском с заглавной буквы.
- * Никаких фиксированных списков — поддерживает любую вещь (Носки, Футболка, Гетры и т.д.).
+ * Никаких фиксированных списков — поддерживает любую вещь (Носки, Тапочки, Футболка и т.д.).
  */
 function detectOneWordTopic(aiData, userText) {
   // 1. Проверяем поле topic от ИИ
@@ -332,20 +418,21 @@ function detectOneWordTopic(aiData, userText) {
 
   // 3. Извлекаем главное предметное слово из запроса пользователя
   if (userText) {
-    const cleanUser = userText.toLowerCase().replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ');
+    const normalized = normalizeFashionQuery(userText);
     const stopWords = new Set([
-      'найди', 'подбери', 'пожалуйста', 'хочу', 'мне', 'купить', 'покажи', 'ищу', 'какой', 'какая',
-      'черный', 'черная', 'черные', 'белый', 'белая', 'белые', 'красный', 'синий', 'зеленый',
-      'оверсайз', 'короткий', 'длинный', 'свободный', 'теплый', 'летний', 'зимний',
-      'аниме', 'принт', 'рисунок', 'хлопок', 'шерсть', 'шелк', 'дешевый', 'дорогой',
-      'с', 'из', 'в', 'на', 'для', 'под', 'от', 'по', 'без', 'и'
+      'желтые', 'желтый', 'желтая', 'черные', 'черный', 'черная',
+      'белые', 'белый', 'белая', 'розовые', 'розовый', 'розовая',
+      'красные', 'красный', 'красная', 'синие', 'синий', 'синяя',
+      'зеленые', 'зеленый', 'зеленая', 'бежевые', 'бежевый', 'бежевая',
+      'серые', 'серый', 'серая', 'фиолетовые', 'фиолетовый', 'оранжевые',
+      'оверсайз', 'короткий', 'длинный', 'свободный', 'теплый', 'летний', 'зимний'
     ]);
-    const words = cleanUser.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
+    const words = normalized.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
     if (words.length > 0) {
       const w = words[0];
       return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
     }
-    const anyWord = cleanUser.split(/\s+/).filter(w => w.length >= 3)[0];
+    const anyWord = normalized.split(/\s+/).filter(w => w.length >= 3)[0];
     if (anyWord) {
       return anyWord.charAt(0).toUpperCase() + anyWord.slice(1).toLowerCase();
     }
@@ -520,16 +607,39 @@ async function askAi(userText) {
     }
   } catch (_) {}
 
-  // Дефолтный ответ при отсутствии соединения (по правилам humanizer)
-  const fallbackTopic = detectOneWordTopic(null, userText) || 'Футболка';
+  // Умный разбор запроса (если API стилиста временно не ответил)
+  const normQuery = normalizeFashionQuery(userText);
+  const fallbackTopic = detectOneWordTopic(null, userText) || 'Вещь';
+
+  // Извлекаем чистые аккуратные теги (цвет, фасон, материал) без мусорных фраз
+  const stopTagWords = new Set(['типа', 'как', 'купить', 'пожалуйста', 'хочу', 'мне', 'покажи', 'ищу', 'вещь']);
+  const cleanTags = normQuery.split(/\s+/).filter(w => w.length >= 3 && !stopTagWords.has(w));
+
+  // Человечный совет стилиста по категории вещи (без дежурного роботизированного текста)
+  let thought = 'Для этой вещи важны удобная посадка и практичный материал ✨';
+  const lowText = (normQuery + ' ' + userText).toLowerCase();
+  if (lowText.includes('тапочк') || lowText.includes('сандал') || lowText.includes('шлеп') || lowText.includes('сланц')) {
+    thought = 'Для домашней обуви лучше выбирать мягкую амортизирующую подошву и дышащие материалы, чтобы стопа не уставала ✨';
+  } else if (lowText.includes('футболк') || lowText.includes('лонгслив') || lowText.includes('топ')) {
+    thought = 'Для базового кроя подойдет плотный хлопок от 220 грамм, тогда воротник и плечи держат форму ✨';
+  } else if (lowText.includes('худи') || lowText.includes('свитшот') || lowText.includes('толстовк')) {
+    thought = 'В оверсайз моделях важен плотный футер с начесом или петлей, чтобы вещь не провисала мешком ✨';
+  } else if (lowText.includes('джинс') || lowText.includes('брюк') || lowText.includes('палаццо')) {
+    thought = 'Высокая посадка и плотная фактура ткани создают красивую прямую линию без лишних складок ✨';
+  } else if (lowText.includes('плать') || lowText.includes('юбк')) {
+    thought = 'При свободном силуэте лучше обращать внимание на струящиеся ткани, которые не мнутся при ходьбе ✨';
+  } else if (lowText.includes('кроссовк') || lowText.includes('кед')) {
+    thought = 'Для повседневной носки важна гибкая подошва и перфорация для циркуляции воздуха ✨';
+  }
+
   return {
     topic: fallbackTopic,
     is_new_topic: true,
-    active_tags: [userText],
-    item_summary: userText,
+    active_tags: cleanTags.slice(0, 3),
+    item_summary: normQuery || userText,
     category: fallbackTopic.toLowerCase(),
-    stylist_thought: 'Подобрала варианты по твоему описанию в каталогах Wildberries и Ozon ✨',
-    google_query: `site:wildberries.ru/catalog ${userText}`
+    stylist_thought: thought,
+    google_query: normQuery || userText
   };
 }
 
@@ -629,23 +739,17 @@ async function handleSearch(userText) {
     }
 
     // 4. Формируем точный поисковый запрос для Google Картинок
-    // Запрос ОБЯЗАН содержать сам предмет (detectedTopic) + детали принта/посадки
-    let cleanSearchQuery = '';
+    // Цвет ОБЯЗАТЕЛЬНО ставится на первое место через normalizeFashionQuery
+    const normalized = normalizeFashionQuery(userText);
     const topicForSearch = detectedTopic || (aiData && aiData.topic) || (aiData && aiData.category) || '';
 
-    if (aiData && aiData.active_tags && Array.isArray(aiData.active_tags) && aiData.active_tags.length > 0) {
-      // Исключаем дубликаты темы из тегов
-      const extraTags = aiData.active_tags
-        .filter(t => !topicForSearch || !t.toLowerCase().includes(topicForSearch.toLowerCase()))
-        .slice(0, 3);
-      cleanSearchQuery = `${topicForSearch} ${extraTags.join(' ')}`.trim();
+    let cleanSearchQuery = '';
+    if (normalized) {
+      cleanSearchQuery = normalized;
+    } else if (topicForSearch) {
+      cleanSearchQuery = topicForSearch;
     } else {
-      cleanSearchQuery = userText
-        .replace(/найди|подбери|пожалуйста|хочу|мне|купить|покажи|ищу/gi, '')
-        .trim();
-    }
-    if (!cleanSearchQuery || cleanSearchQuery.length < 3) {
-      cleanSearchQuery = `${topicForSearch} ${userText}`.trim();
+      cleanSearchQuery = userText;
     }
     cleanSearchQuery = cleanSearchQuery.replace(/site:[^\s]+/gi, '').trim();
 
