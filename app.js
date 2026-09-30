@@ -24,7 +24,7 @@ const state = {
   selectedProvider: 'deepseek-v4.1-flash',
   model: 'deepseek-v4.1-flash',
   apiKey:      localStorage.getItem('sff_api_key')      || '',
-  deepseekKey: localStorage.getItem('sff_deepseek_key') || ''
+  deepseekKey: localStorage.getItem('sff_deepseek_key') || 'sk-01d84e5551ed45548ab16db343aefd7a'
 };
 
 
@@ -303,33 +303,35 @@ async function searchGoogleCse(query) {
 // =========================================================================
 
 const SYSTEM_PROMPT = `
-Ты — консультант по подбору одежды. Ты общаешься естественно, спокойно и по делу, как реальный человек, а не бот.
+Ты — умный ИИ-стилист и консультант по подбору одежды на маркетплейсах (Wildberries и Ozon).
+Твоя задача — проанализировать запрос пользователя, исправить любые опечатки и подготовить точный поисковый запрос для поиска товаров в Google.
 
-ПРАВИЛА ТЕКСТА (HUMANIZER):
-- Пиши просто, конкретно и без искусственного восторга.
-- Запрещены шаблонные фразы: "та самая база", "мастхэв", "подчеркнет индивидуальность", "не просто вещь, а заявление", "гармоничный образ", "идеальный выбор".
-- Запрещены похвалы запроса ("Отличный выбор!", "Прекрасный вкус!").
-- Запрещены надуманные триады ("стильно, удобно и практично").
-- Запрещены поучения консьержа и непрошеные советы ("не забудь примерить", "помни о стирке").
-- Не используй длинные тире (—). Используй запятые, точки или двоеточия.
-- Не ставь гирлянды эмодзи. Можно максимум одну искорку ✨ в конце.
-- В поле "stylist_thought" пиши ровно 1-2 коротких предложения с конкретным замечанием по ткани, плотности или посадке (например: "Для свободного кроя подойдет плотный хлопок от 220 грамм, тогда воротник держит форму.").
+ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
+1. ИСПРАВЛЕНИЕ ОПЕЧАТОК И СЛЕНГА:
+   - Ты обязан самостоятельно исправлять любые опечатки, пропущенные буквы, сленг и разговорные формы (например: сндалей -> сандалии, жжёлтые / жолтые -> желтые, чорные -> черные, кросы -> кроссовки, велик -> велосипедки, штны -> штаны, палацо -> палаццо).
+   - Полностью вычищай любые мусорные слова и слова-паразиты: "типа", "как", "вроде", "купить", "пожалуйста", "найди", "хочу", "покажи", "что-то", "прям".
+2. ФОРМИРОВАНИЕ google_query:
+   - Идеальный поисковый запрос только из ключевых слов (без "site:", без кавычек).
+   - Если указан цвет — ставь его СТРОГО НА ПЕРВОЕ МЕСТО, чтобы поисковик выдавал вещи правильного цвета.
+3. ОПРЕДЕЛЕНИЕ ТЕМЫ (topic):
+   - СТРОГО 1 СЛОВО на русском языке с заглавной буквы — базовый предмет гардероба в именительном падеже (например: Тапочки, Сандалии, Кроссовки, Худи, Футболка, Брюки, Велосипедки, Джинсы, Платье). Без прилагательных и цветов!
+4. is_new_topic (boolean):
+   - true: если начался поиск ДРУГОГО нового предмета или это первый запрос.
+   - false: если продолжается уточнение деталей ТЕКУЩЕЙ вещи (например: "а в желтом цвете", "покороче", "без рисунка").
+5. active_tags:
+   - Массив из 2-4 чистых ключевых характеристик вещи (цвет, фасон, материал).
+6. stylist_thought:
+   - Естественный короткий человечный комментарий (1-2 предложения) по посадке или материалу. В конце одна искорка ✨.
 
-ПРАВИЛА ОПРЕДЕЛЕНИЯ ТЕМЫ ВЕЩИ (topic и is_new_topic):
-1. "topic" — СТРОГО 1 СЛОВО на русском языке с заглавной буквы, называющее базовый предмет гардероба из запроса (например: Носки, Футболка, Велосипедки, Худи, Джинсы, Платье, Брюки, Куртка, Топ, Юбка, Шорты, Пальто, Кардиган, Рубашка, Кеды, Кроссовки, Ботинки, Сумка, Лонгслив, Пиджак, Пуховик, Леггинсы, Кепка, Ремень, Шарф, Свитер, Палаццо, Бомбер и т.д.). Строго ОДНО слово в именительном падеже без прилагательных!
-2. "is_new_topic" — boolean:
-   - true: если начался поиск ДРУГОГО нового предмета или это первый запрос (например, искали футболку, а теперь носки).
-   - false: если продолжается уточнение деталей ТЕКУЩЕЙ вещи (например: "а в черном цвете", "высокая талия", "подлиннее", "из хлопка", "с принтом").
-
-Возвращай строго валидный JSON:
+Возвращай строго валидный JSON такого вида:
 {
-  "topic": "Носки",
+  "topic": "Предмет",
   "is_new_topic": true,
   "active_tags": ["параметр1", "параметр2"],
-  "item_summary": "Связное краткое описание вещи",
-  "category": "носки",
-  "stylist_thought": "Короткий комментарий стилиста по ткани или посадке ✨",
-  "google_query": "site:wildberries.ru/catalog носки аниме"
+  "item_summary": "Краткое связное описание вещи",
+  "category": "категория",
+  "stylist_thought": "Совет по посадке и материалу ✨",
+  "google_query": "цвет предмет особенности"
 }
 `;
 
@@ -338,67 +340,13 @@ const SYSTEM_PROMPT = `
 // =========================================================================
 
 /**
- * Умная нормализация поискового запроса:
- * - Исправляет опечатки ("сндалей" -> сандалии, "жжёлтые" -> желтые)
- * - Убирает слова-паразиты ("типа", "как", "вроде", "купить", "пожалуйста")
- * - Выносит цвет ("желтые", "черные" и т.д.) на первое место, чтобы Google искал именно нужный цвет
- */
-function normalizeFashionQuery(raw) {
-  if (!raw) return '';
-  let str = raw.toLowerCase().replace(/ё/g, 'е').replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ');
-
-  const typos = {
-    'сндалей': 'сандалии',
-    'сандалей': 'сандалии',
-    'сандали': 'сандалии',
-    'сандаль': 'сандалии',
-    'жжелтые': 'желтые',
-    'жолтые': 'желтые',
-    'жёлтые': 'желтые',
-    'кросы': 'кроссовки',
-    'кроссы': 'кроссовки',
-    'велик': 'велосипедки',
-    'велы': 'велосипедки'
-  };
-
-  const stopWords = new Set([
-    'типа', 'как', 'вроде', 'наподобие', 'стиле', 'купить', 'пожалуйста',
-    'найди', 'мне', 'хочу', 'покажи', 'ищу', 'какой', 'какая', 'какие',
-    'что-то', 'прям', 'очень', 'бы'
-  ]);
-
-  const colorWords = [
-    'желтые', 'желтый', 'желтая', 'черные', 'черный', 'черная',
-    'белые', 'белый', 'белая', 'розовые', 'розовый', 'розовая',
-    'красные', 'красный', 'красная', 'синие', 'синий', 'синяя',
-    'зеленые', 'зеленый', 'зеленая', 'бежевые', 'бежевый', 'бежевая',
-    'серые', 'серый', 'серая', 'фиолетовые', 'фиолетовый', 'оранжевые'
-  ];
-
-  const tokens = str.split(/\s+/).filter(Boolean).map(t => typos[t] || t);
-  const meaningful = tokens.filter(t => !stopWords.has(t) && t.length >= 2);
-
-  // Ищем цвет
-  const foundColor = meaningful.find(t => colorWords.includes(t));
-  const otherWords = meaningful.filter(t => t !== foundColor);
-
-  // Цвет ВСЕГДА ставим на первое место в запросе для точной выдачи в Google
-  if (foundColor) {
-    return `${foundColor} ${otherWords.join(' ')}`.trim();
-  }
-  return meaningful.join(' ').trim();
-}
-
-/**
  * Извлекает строго 1 слово предмета на русском с заглавной буквы.
- * Никаких фиксированных списков — поддерживает любую вещь (Носки, Тапочки, Футболка и т.д.).
+ * В первую очередь берет значение, определенное ИИ (topic или category).
  */
 function detectOneWordTopic(aiData, userText) {
   // 1. Проверяем поле topic от ИИ
-  let raw = (aiData && aiData.topic ? String(aiData.topic) : '').trim();
-  raw = raw.replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, '').trim();
-
-  if (raw) {
+  if (aiData && aiData.topic) {
+    let raw = String(aiData.topic).trim().replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, '');
     const words = raw.split(/\s+/).filter(w => w.length >= 2 && !/^(с|из|в|на|для|под|от|по|без|и)$/i.test(w));
     if (words.length > 0) {
       const w = words[0];
@@ -416,25 +364,12 @@ function detectOneWordTopic(aiData, userText) {
     }
   }
 
-  // 3. Извлекаем главное предметное слово из запроса пользователя
+  // 3. Резервный случай (если ИИ не ответил) — первое слово из запроса
   if (userText) {
-    const normalized = normalizeFashionQuery(userText);
-    const stopWords = new Set([
-      'желтые', 'желтый', 'желтая', 'черные', 'черный', 'черная',
-      'белые', 'белый', 'белая', 'розовые', 'розовый', 'розовая',
-      'красные', 'красный', 'красная', 'синие', 'синий', 'синяя',
-      'зеленые', 'зеленый', 'зеленая', 'бежевые', 'бежевый', 'бежевая',
-      'серые', 'серый', 'серая', 'фиолетовые', 'фиолетовый', 'оранжевые',
-      'оверсайз', 'короткий', 'длинный', 'свободный', 'теплый', 'летний', 'зимний'
-    ]);
-    const words = normalized.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
+    const words = userText.trim().replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
     if (words.length > 0) {
       const w = words[0];
       return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-    }
-    const anyWord = normalized.split(/\s+/).filter(w => w.length >= 3)[0];
-    if (anyWord) {
-      return anyWord.charAt(0).toUpperCase() + anyWord.slice(1).toLowerCase();
     }
   }
 
@@ -534,22 +469,42 @@ async function askAi(userText) {
     { role: 'user', content: userText }
   ];
 
-  // 1. Попытка через прямой DeepSeek API (если ключ sk-... и не sk-or-...)
+  // 1. Попытка через прямой DeepSeek API (модель DeepSeek-V4.1-Flash)
   if (state.deepseekKey && !state.deepseekKey.startsWith('sk-or-')) {
     try {
-      const res = await fetch('https://api.deepseek.com/chat/completions', {
+      let res = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${state.deepseekKey}`
         },
         body: JSON.stringify({
-          model: 'deepseek-chat',
+          model: 'deepseek-v4.1-flash',
           messages: messages,
-          temperature: 0.3,
+          temperature: 0.1,
           response_format: { type: 'json_object' }
         })
       });
+
+      if (!res.ok) {
+        const err = await res.clone().json().catch(() => ({}));
+        if (err?.error?.message?.includes('deepseek-flash')) {
+          res = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${state.deepseekKey}`
+            },
+            body: JSON.stringify({
+              model: 'deepseek-flash',
+              messages: messages,
+              temperature: 0.1,
+              response_format: { type: 'json_object' }
+            })
+          });
+        }
+      }
+
       if (res.ok) {
         const d = await res.json();
         return extractJson(d.choices[0].message.content);
@@ -577,7 +532,7 @@ async function askAi(userText) {
         body: JSON.stringify({
           model: 'deepseek-v4.1-flash',
           messages: messages,
-          temperature: 0.3,
+          temperature: 0.1,
           response_format: { type: 'json_object' }
         })
       });
@@ -590,14 +545,14 @@ async function askAi(userText) {
     }
   }
 
-  // 3. Бесплатный фоллбэк строго с моделью DeepSeek
+  // 3. Бесплатный фоллбэк с моделью DeepSeek
   try {
     const res = await fetch('https://text.pollinations.ai/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: [{ role: 'user', content: messages.map(m => m.content).join('\n') }],
-        model: 'deepseek', // Строго DeepSeek
+        model: 'deepseek',
         jsonMode: true
       })
     });
@@ -607,39 +562,18 @@ async function askAi(userText) {
     }
   } catch (_) {}
 
-  // Умный разбор запроса (если API стилиста временно не ответил)
-  const normQuery = normalizeFashionQuery(userText);
+  // Аварийный ответ (только при полном отключении сети)
   const fallbackTopic = detectOneWordTopic(null, userText) || 'Вещь';
-
-  // Извлекаем чистые аккуратные теги (цвет, фасон, материал) без мусорных фраз
-  const stopTagWords = new Set(['типа', 'как', 'купить', 'пожалуйста', 'хочу', 'мне', 'покажи', 'ищу', 'вещь']);
-  const cleanTags = normQuery.split(/\s+/).filter(w => w.length >= 3 && !stopTagWords.has(w));
-
-  // Человечный совет стилиста по категории вещи (без дежурного роботизированного текста)
-  let thought = 'Для этой вещи важны удобная посадка и практичный материал ✨';
-  const lowText = (normQuery + ' ' + userText).toLowerCase();
-  if (lowText.includes('тапочк') || lowText.includes('сандал') || lowText.includes('шлеп') || lowText.includes('сланц')) {
-    thought = 'Для домашней обуви лучше выбирать мягкую амортизирующую подошву и дышащие материалы, чтобы стопа не уставала ✨';
-  } else if (lowText.includes('футболк') || lowText.includes('лонгслив') || lowText.includes('топ')) {
-    thought = 'Для базового кроя подойдет плотный хлопок от 220 грамм, тогда воротник и плечи держат форму ✨';
-  } else if (lowText.includes('худи') || lowText.includes('свитшот') || lowText.includes('толстовк')) {
-    thought = 'В оверсайз моделях важен плотный футер с начесом или петлей, чтобы вещь не провисала мешком ✨';
-  } else if (lowText.includes('джинс') || lowText.includes('брюк') || lowText.includes('палаццо')) {
-    thought = 'Высокая посадка и плотная фактура ткани создают красивую прямую линию без лишних складок ✨';
-  } else if (lowText.includes('плать') || lowText.includes('юбк')) {
-    thought = 'При свободном силуэте лучше обращать внимание на струящиеся ткани, которые не мнутся при ходьбе ✨';
-  } else if (lowText.includes('кроссовк') || lowText.includes('кед')) {
-    thought = 'Для повседневной носки важна гибкая подошва и перфорация для циркуляции воздуха ✨';
-  }
+  const cleanTokens = (userText || '').replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
 
   return {
     topic: fallbackTopic,
     is_new_topic: true,
-    active_tags: cleanTags.slice(0, 3),
-    item_summary: normQuery || userText,
+    active_tags: cleanTokens.slice(0, 3),
+    item_summary: userText,
     category: fallbackTopic.toLowerCase(),
-    stylist_thought: thought,
-    google_query: normQuery || userText
+    stylist_thought: 'Для этой вещи важны удобная посадка и практичный материал ✨',
+    google_query: userText
   };
 }
 
@@ -738,20 +672,17 @@ async function handleSearch(userText) {
       addRecentTopic(detectedTopic, isNew);
     }
 
-    // 4. Формируем точный поисковый запрос для Google Картинок
-    // Цвет ОБЯЗАТЕЛЬНО ставится на первое место через normalizeFashionQuery
-    const normalized = normalizeFashionQuery(userText);
-    const topicForSearch = detectedTopic || (aiData && aiData.topic) || (aiData && aiData.category) || '';
-
+    // 4. Поисковый запрос для Google Картинок берем строго от ИИ DeepSeek-V4.1-Flash
+    // Модель DeepSeek-V4.1-Flash сама исправила опечатки, вычистила мусор и вынесла цвет на первое место
     let cleanSearchQuery = '';
-    if (normalized) {
-      cleanSearchQuery = normalized;
-    } else if (topicForSearch) {
-      cleanSearchQuery = topicForSearch;
+    if (aiData && aiData.google_query) {
+      cleanSearchQuery = String(aiData.google_query);
+    } else if (detectedTopic) {
+      cleanSearchQuery = detectedTopic;
     } else {
       cleanSearchQuery = userText;
     }
-    cleanSearchQuery = cleanSearchQuery.replace(/site:[^\s]+/gi, '').trim();
+    cleanSearchQuery = cleanSearchQuery.replace(/site:[^\s]+/gi, '').replace(/[«»"'`.,!?:;(){}\[\]*✦✧⋆✨🌸💫]/g, ' ').trim();
 
     const category = aiData.category || 'одежда';
     const items = await getLookItems(category, cleanSearchQuery);
